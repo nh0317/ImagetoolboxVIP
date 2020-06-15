@@ -13,7 +13,7 @@ def gaussian(scale, sigma):
     for i in range(0, scale):
         for j in range(0, scale):
             mask[i, j] = exp((-i * i - j * j) / (2 * sigma * sigma))
-            mask[i, j] = mask[i, j] / (2 * 3.14 * sigma * sigma)
+            mask[i, j] = mask[i, j] / (2 * pi * sigma * sigma)
             sum += mask[i, j]
     mask = mask / sum
     return mask
@@ -54,7 +54,10 @@ def EdgeDetection(image):
     #가우시안 마스크 생성 및 적용
     scale = 5 #로딩시간이 오래걸린다면 scale=3으로 변경
     gaussian_mask = gaussian(scale, 1)
+
     gaussian_arr=filter(gaussian_mask,scale,grayscale)
+    for i in range(0,10):
+        gaussian_arr=filter(gaussian_mask,scale,gaussian_arr)
 
     #라플라시안 마스크 및 적용
     laplacian_mask1=np.array([[-1,-1,-1],
@@ -67,8 +70,22 @@ def EdgeDetection(image):
                                 [0, 0, -1, 0, 0]])
 
     #시간이 오래 걸린다면 laplacian_arr=filter(laplacian_mask1,3,gaussian_arr)으로 변경
-    laplacian_arr=filter(laplacian_mask2,5,gaussian_arr)
-    image = qimage2ndarray.array2qimage(laplacian_arr, normalize=False)
+    laplacian_arr = filter(laplacian_mask1, 3, gaussian_arr)
+
+    image_padding = np.pad(laplacian_arr, ((1,1),(1,1)), 'constant', constant_values=(128))
+
+    x, y = laplacian_arr.shape
+    edge_arr=laplacian_arr.copy()
+    for i in range(1, x - 1):
+        for j in range(1, y-1):
+                if laplacian_arr[i, j] >= 0:
+                    if (laplacian_arr[i+1, j] * laplacian_arr[i-1, j]<0) or (laplacian_arr[i, j+1] * laplacian_arr[i, j-1]<0):
+                        edge_arr[i, j] =255
+        else:
+            edge_arr[i, j] = 0
+
+    #이미지 출력
+    image = qimage2ndarray.array2qimage(edge_arr, normalize=False)
     qPixmapVar = QPixmap.fromImage(image)
     return qPixmapVar
 
@@ -90,7 +107,7 @@ def CornerDetection(image):
         for j in range(npad, y + npad):
             M = image_padding[i - npad:i + npad + 1, j - npad:j + npad + 1]
             R = np.linalg.det(M) - 0.04 * (np.trace(M) * np.trace(M))
-            if R > 0:
+            if R > 1:
                 corner_arr[i - npad, j - npad] = [255, 0, 0]
 
     image = qimage2ndarray.array2qimage(corner_arr, normalize=False)
@@ -105,8 +122,10 @@ def Hough(image):
 
     # 가우시안 마스크 생성 및 적용
     scale = 5  # 로딩시간이 오래걸린다면 scale=3으로 변경
-    gaussian_mask = gaussian(scale, 0.7)
+    gaussian_mask = gaussian(scale, 1)
     gaussian_arr = filter(gaussian_mask, scale, grayscale)
+    for i in range(0, 10):
+        gaussian_arr = filter(gaussian_mask, scale, gaussian_arr)
 
     # 라플라시안 마스크 및 적용
     laplacian_mask1 = np.array([[-1, -1, -1],
@@ -122,28 +141,35 @@ def Hough(image):
     laplacian_arr = filter(laplacian_mask2, 5, gaussian_arr)
     image_arr2 = qimage2ndarray.rgb_view(image)
     line=image_arr2.copy()
+    x, y = laplacian_arr.shape
+    edge_arr=laplacian_arr.copy()
+    for i in range(1, x - 1):
+        for j in range(1, y-1):
+                if laplacian_arr[i, j] >= 0:
+                    if (laplacian_arr[i+1, j] * laplacian_arr[i-1, j]<0) or (laplacian_arr[i+1, j] * laplacian_arr[i, j-1]<0):
+                        edge_arr[i, j] =255
+                    else:
+                        edge_arr[i, j] = 0
 
-    print(grayscale)
+
+
     #허프영역 생성
-    x, y = grayscale.shape
-    t = math.atan(y/x)
-    p = x * math.cos(t) + y * math.sin(t)
-    p=int(p)
-    hough = np.zeros(shape=(p,90))
+    x,y=edge_arr.shape
+    hough_arr=edge_arr.copy()
 
     #허프 변환
     for i in range(1, x):
         for j in range(1, y):
            #엣지픽셀 검출
-            if laplacian_arr[i,j] > 170:
+            if edge_arr[i,j] > 0:
                  theta=math.atan(j/i)
                  r=i*math.cos(theta) + j*math.sin(theta)
-                 theta=int(theta*(180/3.14))
-                 r=int(r)
-                 hough[r,theta]+=1
+                 hough_arr[i,j]=r,theta
 
-    #라인검출
-    for i in range(1, p):
+    #vote hough 영역에서 같은 값 검출
+
+    #vote 영역에서 2보다 크면 라인검출.
+    for i in range(1, x):
         for j in range(1, 90):
             if hough[i,j] >2:
                 m=i
@@ -152,7 +178,7 @@ def Hough(image):
                     for s in range(1, y):
                         theta = math.atan(s / k)
                         r = k * math.cos(theta) + s * math.sin(theta)
-                        theta = int(theta * (180 / 3.14))
+                        theta = int(theta * (180 / pi))
                         r = int(r)
                         if (r==m) and (theta==n):
                             line[k,s]=[255,0,0]
